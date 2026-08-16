@@ -25,17 +25,17 @@ chrome.action.onClicked.addListener(async (tab) => {
     return baseUrlObj.toString();
   }
 
-  async function checkIfBookmarkExists(folderId, bookmarkUrl) {
+  async function checkIfSameTimestampExists(folderId, bookmarkUrl) {
     const folderChildren = await chrome.bookmarks.getChildren(folderId);
     return folderChildren.some((node) => node.url === bookmarkUrl);
   }
 
-  // If a bookmark of the same video exists with an earlier timestamp, update it
-  async function deleteIfEarlierTimestampsExist(folderId, baseUrl, timestamp) {
+  // If a bookmark of the same video exists with a different timestamp, delete it
+  async function deleteIfDifferentTimestampsExist(folderId, baseUrl) {
     const folderChildren = await chrome.bookmarks.getChildren(folderId);
     const baseUrlObj = new URL(baseUrl);
 
-    const nodesToDelete = folderChildren.filter((node) => {
+    const bookmarkNodesToDelete = folderChildren.filter((node) => {
       if (!node.url) return false;
       const nodeUrlObj = new URL(node.url);
 
@@ -46,22 +46,15 @@ chrome.action.onClicked.addListener(async (tab) => {
         nodeUrlObj.searchParams.get("list") ===
         baseUrlObj.searchParams.get("list");
 
-      const nodeTimestamp = parseInt(
-        nodeUrlObj.searchParams.get("t") || "0",
-        10,
-      );
-      const doesEarlierTimestampExist = nodeTimestamp < timestamp;
-
       return (
         nodeUrlObj.origin === baseUrlObj.origin &&
         doesVideoIdMatch &&
-        doesListIdMatch &&
-        doesEarlierTimestampExist
+        doesListIdMatch
       );
     });
 
     await Promise.all(
-      nodesToDelete.map((node) => chrome.bookmarks.remove(node.id)),
+      bookmarkNodesToDelete.map((node) => chrome.bookmarks.remove(node.id)),
     );
   }
 
@@ -92,6 +85,7 @@ chrome.action.onClicked.addListener(async (tab) => {
       const createTimestampedBookmarkUrl = (url, timestamp) => {
         const urlObj = new URL(url);
 
+        // Remove the "index" parameter if it exists
         if (urlObj.searchParams.get("index")) {
           urlObj.searchParams.delete("index");
         }
@@ -126,7 +120,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   const folderId = "2";
   const bookmarkTitle = `${result.title} - ${result.timestamp}s`;
 
-  const alreadyExists = await checkIfBookmarkExists(
+  const alreadyExists = await checkIfSameTimestampExists(
     folderId,
     result.bookmarkUrl,
   );
