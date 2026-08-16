@@ -1,6 +1,72 @@
 chrome.action.onClicked.addListener(async (tab) => {
+  function createTimestampedBookmarkUrl(url, timestamp) {
+    const urlObj = new URL(url);
+
+    // Delete the "index" search parameter if it exists
+    if (urlObj.searchParams.get("index")) {
+      urlObj.searchParams.delete("index");
+    }
+
+    urlObj.searchParams.set("t", `${timestamp}s`);
+    return urlObj.toString();
+  }
+
+  // Create a base URL object with just the "v" and optional "list" search parameters
+  function createBaseUrl(url) {
+    const baseUrlObj = new URL(url);
+
+    const baseUrlParamEntries = Array.from(baseUrlObj.searchParams.entries());
+    baseUrlParamEntries.forEach(([key]) => {
+      if (key !== "v" && key !== "list") {
+        baseUrlObj.searchParams.delete(key);
+      }
+    });
+
+    return baseUrlObj.toString();
+  }
+
+  async function checkIfBookmarkExists(folderId, bookmarkUrl) {
+    const folderChildren = await chrome.bookmarks.getChildren(folderId);
+    return folderChildren.some((node) => node.url === bookmarkUrl);
+  }
+
+  // If a bookmark of the same video exists with an earlier timestamp, update it
+  async function deleteIfEarlierTimestampsExist(folderId, baseUrl, timestamp) {
+    const folderChildren = await chrome.bookmarks.getChildren(folderId);
+    const baseUrlObj = new URL(baseUrl);
+
+    const nodesToDelete = folderChildren.filter((node) => {
+      if (!node.url) return false;
+      const nodeUrlObj = new URL(node.url);
+
+      const doesVideoIdMatch =
+        nodeUrlObj.searchParams.get("v") === baseUrlObj.searchParams.get("v");
+
+      const doesListIdMatch =
+        nodeUrlObj.searchParams.get("list") ===
+        baseUrlObj.searchParams.get("list");
+
+      const nodeTimestamp = parseInt(
+        nodeUrlObj.searchParams.get("t") || "0",
+        10,
+      );
+      const doesEarlierTimestampExist = nodeTimestamp < timestamp;
+
+      return (
+        nodeUrlObj.origin === baseUrlObj.origin &&
+        doesVideoIdMatch &&
+        doesListIdMatch &&
+        doesEarlierTimestampExist
+      );
+    });
+
+    await Promise.all(
+      nodesToDelete.map((node) => chrome.bookmarks.remove(node.id)),
+    );
+  }
+
   console.log("Current tab:", tab.id);
-  if (!tab.id || !tab.url?.includes("*://www.youtube.com/watch")) {
+  if (!tab.id || !tab.url?.includes("youtube.com/watch")) {
     console.log("Not a YouTube video");
     return;
   }
@@ -8,42 +74,73 @@ chrome.action.onClicked.addListener(async (tab) => {
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: async () => {
+      const createBaseUrl = (url) => {
+        const baseUrlObj = new URL(url);
+
+        const baseUrlParamEntries = Array.from(
+          baseUrlObj.searchParams.entries(),
+        );
+        baseUrlParamEntries.forEach(([key]) => {
+          if (key !== "v" && key !== "list") {
+            baseUrlObj.searchParams.delete(key);
+          }
+        });
+
+        return baseUrlObj.toString();
+      };
+
+      const createTimestampedBookmarkUrl = (url, timestamp) => {
+        const urlObj = new URL(url);
+
+        if (urlObj.searchParams.get("index")) {
+          urlObj.searchParams.delete("index");
+        }
+
+        urlObj.searchParams.set("t", `${timestamp}s`);
+        return urlObj.toString();
+      };
+
       const video = document.querySelector("video");
       if (!video) return null;
 
       const currentUrl = window.location.href;
-      const t = Math.floor(video.currentTime);
-      const urlObj = new URL(currentUrl);
-      urlObj.searchParams.set("t", `${t}s`);
-
-      // Delete the "index" search parameter if it exists
-      if (urlObj.searchParams.get("index")) {
-        urlObj.searchParams.delete("index");
-      }
+      const timestamp = Math.floor(video.currentTime);
+      const bookmarkUrl = createTimestampedBookmarkUrl(currentUrl, timestamp);
 
       return {
-        bookmarkUrl: urlObj.toString(),
+        baseUrl: createBaseUrl(currentUrl),
+        bookmarkUrl,
         title: document.title,
-        timestamp: t,
+        timestamp: timestamp,
       };
     },
   });
 
-  const result = results[0].result;
+  const result = results?.[0]?.result;
+  if (!result) {
+    console.log("No video found");
+    return;
+  }
+  // console.log("Result from content script:", result);
 
   const folderId = "2";
   const bookmarkTitle = `${result.title} - ${result.timestamp}s`;
 
-  // Only check this folder for same-title bookmarks with the same timestamp
-  const folderChildren = await chrome.bookmarks.getChildren(folderId);
-  const alreadyExists = folderChildren.some(
-    (node) => node.url === result.bookmarkUrl,
+  const alreadyExists = await checkIfBookmarkExists(
+    folderId,
+    result.bookmarkUrl,
   );
-
   if (alreadyExists) {
     console.log("Bookmark already exists in folder, skipping:", bookmarkTitle);
     return;
   }
+
+  // Delete bookmarks of the same video with earlier timestamps
+  await deleteIfEarlierTimestampsExist(
+    folderId,
+    result.baseUrl,
+    result.timestamp,
+  );
 
   await chrome.bookmarks.create({
     parentId: folderId,
