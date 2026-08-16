@@ -130,7 +130,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 
   // Delete bookmarks of the same video with earlier timestamps
-  await deleteIfEarlierTimestampsExist(
+  await deleteIfDifferentTimestampsExist(
     folderId,
     result.baseUrl,
     result.timestamp,
