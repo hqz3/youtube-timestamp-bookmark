@@ -1,6 +1,7 @@
 import {
   createTimestampedUrl,
   doesSameTimestampExists,
+  getFolder,
   updateIfDifferentTimestampsExist,
 } from "./utils.js";
 
@@ -31,19 +32,21 @@ chrome.action.onClicked.addListener(async (tab) => {
     return;
   }
 
-  const folderId = "2";
+  const folderTitle = "Other Bookmarks";
   const bookmarkUrl = createTimestampedUrl(result.currentUrl, result.timestamp);
   const bookmarkUrlObj = new URL(bookmarkUrl);
   const bookmarkTitle = `${result.title} - ${result.timestamp}s`;
 
-  const alreadyExists = await doesSameTimestampExists(folderId, bookmarkUrlObj);
+  const folder = await getFolder(folderTitle);
+
+  const alreadyExists = doesSameTimestampExists(folder, bookmarkUrlObj);
   if (alreadyExists) {
     console.log("Bookmark already exists in folder, skipping:", bookmarkTitle);
     return;
   }
 
   const updated = await updateIfDifferentTimestampsExist(
-    folderId,
+    folder,
     bookmarkUrlObj,
     bookmarkTitle,
   );
@@ -53,7 +56,7 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 
   await chrome.bookmarks.create({
-    parentId: folderId,
+    parentId: folder.id,
     title: bookmarkTitle,
     url: bookmarkUrl,
   });

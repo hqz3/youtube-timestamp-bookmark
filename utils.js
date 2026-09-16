@@ -34,8 +34,32 @@ function doesBookmarksMatch(bookmarkUrlObj, nodeUrlObj) {
   );
 }
 
-async function doesSameTimestampExists(folderId, bookmarkUrlObj) {
-  const folderChildren = await chrome.bookmarks.getChildren(folderId);
+async function getFolder(folderTitle) {
+  let node = false;
+  const treeNodes = await chrome.bookmarks.getTree();
+
+  // BFS the treeNodes
+  const nodes = [...treeNodes];
+
+  while (nodes.length > 0) {
+    const currentNode = nodes.shift();
+
+    if (currentNode.title === folderTitle) {
+      node = currentNode;
+      return node;
+    }
+
+    if (currentNode.children) {
+      nodes.push(...currentNode.children);
+    }
+  }
+
+  return node;
+}
+
+function doesSameTimestampExists(folder, bookmarkUrlObj) {
+  console.log("Checking for existing bookmarks in folder:", folder);
+  const folderChildren = folder?.children || [];
 
   return folderChildren.some((node) => {
     if (!node.url) return false;
@@ -51,11 +75,11 @@ async function doesSameTimestampExists(folderId, bookmarkUrlObj) {
 // If a bookmark of the same video exists with a different timestamp, update it
 // If there are more than one bookmark of the same video, remove the nodes with the higher indices
 async function updateIfDifferentTimestampsExist(
-  folderId,
+  folder,
   bookmarkUrlObj,
   bookmarkTitle,
 ) {
-  const folderChildren = await chrome.bookmarks.getChildren(folderId);
+  const folderChildren = folder?.children || [];
 
   const matchingNodes = folderChildren.filter((node) => {
     if (!node.url) return false;
@@ -63,6 +87,7 @@ async function updateIfDifferentTimestampsExist(
     return doesBookmarksMatch(bookmarkUrlObj, nodeUrlObj);
   });
 
+  // If there is at least one matching node, update the first one and remove the rest
   if (matchingNodes.length >= 1) {
     await Promise.all([
       chrome.bookmarks.update(matchingNodes[0].id, {
@@ -81,6 +106,7 @@ async function updateIfDifferentTimestampsExist(
 export {
   createBaseUrl,
   createTimestampedUrl,
+  getFolder,
   doesBookmarksMatch,
   doesSameTimestampExists,
   updateIfDifferentTimestampsExist,
